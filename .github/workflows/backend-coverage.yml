@@ -90,7 +90,11 @@ jobs:
             --query authorizationToken \
             --output text)
           echo "::add-mask::$TOKEN"
+          # Set both env var names: settings.xml across repos uses either
+          # CODEARTIFACT_TOKEN or CODEARTIFACT_AUTH_TOKEN. Exporting both
+          # keeps the reusable workflow compatible with either convention.
           echo "CODEARTIFACT_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          echo "CODEARTIFACT_AUTH_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
       - name: Configure Maven settings.xml
         if: ${{ inputs.use-codeartifact }}
