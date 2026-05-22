@@ -1,0 +1,138 @@
+name: Backend Coverage (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        type: string
+        default: '17'
+      threshold-overall:
+        description: 'Hard gating threshold for overall project coverage. Set to 0 to disable.'
+        type: string
+        default: '0'
+      threshold-patch:
+        description: 'Hard gating threshold for patch coverage (changed lines).'
+        type: string
+        default: '90'
+      target-overall:
+        description: 'Aspirational target shown in the PR comment for overall coverage.'
+        type: string
+        default: '90'
+      jacoco-xml:
+        description: 'Path to jacoco.xml relative to the repo root.'
+        type: string
+        default: 'target/site/jacoco/jacoco.xml'
+      use-codeartifact:
+        description: 'If true, authenticate against AWS CodeArtifact before running mvn.'
+        type: boolean
+        default: false
+      aws-role-arn:
+        type: string
+        default: 'arn:aws:iam::612700283677:role/github-actions-codeartifact'
+      codeartifact-domain:
+        type: string
+        default: 'choizmaven'
+      codeartifact-domain-owner:
+        type: string
+        default: '612700283677'
+      maven-settings-path:
+        description: 'Path to Maven settings.xml inside the consumer repo when use-codeartifact is true.'
+        type: string
+        default: '.circleci/settings.xml'
+
+jobs:
+  test-and-coverage:
+    name: Test & Coverage
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout consumer repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout shared scripts
+        uses: actions/checkout@v4
+        with:
+          repository: Choizapp/.github
+          ref: main
+          path: .choiz-shared
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+          cache: maven
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Configure AWS credentials (OIDC)
+        if: ${{ inputs.use-codeartifact }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.aws-role-arn }}
+          aws-region: us-east-1
+
+      - name: Get CodeArtifact token
+        if: ${{ inputs.use-codeartifact }}
+        run: |
+          TOKEN=$(aws codeartifact get-authorization-token \
+            --domain ${{ inputs.codeartifact-domain }} \
+            --domain-owner ${{ inputs.codeartifact-domain-owner }} \
+            --region us-east-1 \
+            --query authorizationToken \
+            --output text)
+          echo "::add-mask::$TOKEN"
+          echo "CODEARTIFACT_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Configure Maven settings.xml
+        if: ${{ inputs.use-codeartifact }}
+        run: |
+          mkdir -p ~/.m2
+          cp "${{ inputs.maven-settings-path }}" ~/.m2/settings.xml
+
+      - name: Run tests with coverage (CodeArtifact)
+        if: ${{ inputs.use-codeartifact }}
+        run: mvn --settings ~/.m2/settings.xml -B test
+
+      - name: Run tests with coverage
+        if: ${{ !inputs.use-codeartifact }}
+        run: mvn -B test
+
+      - name: Upload JaCoCo report (artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
+          retention-days: 7
+
+      - name: Generate coverage report
+        id: covreport
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          THRESHOLD_OVERALL: ${{ inputs.threshold-overall }}
+          THRESHOLD_PATCH: ${{ inputs.threshold-patch }}
+          TARGET_OVERALL: ${{ inputs.target-overall }}
+          JACOCO_XML: ${{ inputs.jacoco-xml }}
+        run: python .choiz-shared/.github/scripts/coverage-report.py
+
+      - name: Post coverage comment on PR
+        if: always() && github.event_name == 'pull_request' && hashFiles('coverage-comment.md') != ''
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: coverage-report
+          path: coverage-comment.md
+
+      - name: Fail if coverage under threshold
+        if: github.event_name == 'pull_request' && steps.covreport.outputs.passed != 'true'
+        run: |
+          echo "::error::Coverage below threshold (overall=${{ steps.covreport.outputs.overall_pct }}%, patch=${{ steps.covreport.outputs.patch_pct }}%, overall-threshold=${{ inputs.threshold-overall }}%, patch-threshold=${{ inputs.threshold-patch }}%)"
+          exit 1
