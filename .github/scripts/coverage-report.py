@@ -37,11 +37,13 @@ def parse_jacoco():
     total = total_missed + total_covered
     overall_pct = (100.0 * total_covered / total) if total else 0.0
 
+    # Key by package + filename (no source-root prefix) so we can match
+    # changed files from either src/main/java/... or src/main/kotlin/...
     file_lines = {}
     for pkg in root.findall("package"):
         pkg_name = pkg.get("name")
         for sf in pkg.findall("sourcefile"):
-            path = f"{SOURCE_ROOT}/{pkg_name}/{sf.get('name')}"
+            key = f"{pkg_name}/{sf.get('name')}"
             lines = {}
             for ln in sf.findall("line"):
                 nr = int(ln.get("nr"))
@@ -50,13 +52,23 @@ def parse_jacoco():
                 if missed == 0 and covered == 0:
                     continue
                 lines[nr] = covered > 0
-            file_lines[path] = lines
+            file_lines[key] = lines
     return overall_pct, file_lines
+
+
+SOURCE_PREFIXES = ("src/main/java/", "src/main/kotlin/")
+
+
+def strip_source_root(path: str) -> str:
+    for prefix in SOURCE_PREFIXES:
+        if path.startswith(prefix):
+            return path[len(prefix):]
+    return path
 
 
 def changed_lines_per_file():
     diff = subprocess.check_output(
-        ["git", "diff", "--unified=0", f"{BASE_REF}...HEAD", "--", "*.java"],
+        ["git", "diff", "--unified=0", f"{BASE_REF}...HEAD", "--", "*.java", "*.kt"],
         text=True,
     )
     result, current = {}, None
@@ -110,10 +122,11 @@ def main():
 
     rows, total_track, total_cov = [], 0, 0
     for path, lines in changed.items():
-        cov = file_lines.get(path)
+        key = strip_source_root(path)
+        cov = file_lines.get(key)
         if cov is None:
             for k, v in file_lines.items():
-                if k.endswith(path) or path.endswith(k):
+                if k.endswith(key) or key.endswith(k):
                     cov = v
                     break
         if not cov:
