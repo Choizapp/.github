@@ -58,7 +58,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Choizapp/.github
-          ref: main
+          # Pin to the exact commit of the workflow file that the caller is
+          # using. github.job_workflow_sha is the SHA of the called reusable
+          # workflow, so the script we run is always the one that ships with
+          # this specific workflow version — even if main moves ahead.
+          ref: ${{ github.job_workflow_sha }}
           path: .choiz-shared
 
       - name: Set up JDK
@@ -82,10 +86,13 @@ jobs:
 
       - name: Get CodeArtifact token
         if: ${{ inputs.use-codeartifact }}
+        env:
+          CA_DOMAIN: ${{ inputs.codeartifact-domain }}
+          CA_OWNER: ${{ inputs.codeartifact-domain-owner }}
         run: |
           TOKEN=$(aws codeartifact get-authorization-token \
-            --domain ${{ inputs.codeartifact-domain }} \
-            --domain-owner ${{ inputs.codeartifact-domain-owner }} \
+            --domain "$CA_DOMAIN" \
+            --domain-owner "$CA_OWNER" \
             --region us-east-1 \
             --query authorizationToken \
             --output text)
@@ -98,9 +105,11 @@ jobs:
 
       - name: Configure Maven settings.xml
         if: ${{ inputs.use-codeartifact }}
+        env:
+          MAVEN_SETTINGS_PATH: ${{ inputs.maven-settings-path }}
         run: |
           mkdir -p ~/.m2
-          cp "${{ inputs.maven-settings-path }}" ~/.m2/settings.xml
+          cp "$MAVEN_SETTINGS_PATH" ~/.m2/settings.xml
 
       - name: Run tests with coverage (CodeArtifact)
         if: ${{ inputs.use-codeartifact }}
