@@ -100,8 +100,3 @@ This repo is **public** but contains only CI orchestration — no secrets, no pr
 - The shared script is checked out at the same commit SHA as the called workflow (`github.job_workflow_sha`), so script and workflow always travel together.
 
 Report security issues privately to the repo owner before opening a PR.
-
-## Related
-
-- Linear issue: [CHOIZ-762](https://linear.app/choiz-app/issue/CHOIZ-762)
-- First migrated repo: [Choizapp/checkout-core-mx](https://github.com/Choizapp/checkout-core-mx)
