@@ -1,0 +1,5 @@
+# Critical CI infrastructure used by every backend repo.
+# Any change here propagates to 11+ consumer workflows.
+*                              @evacalla
+.github/workflows/             @evacalla
+.github/scripts/               @evacalla

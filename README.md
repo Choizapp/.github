@@ -86,7 +86,20 @@ jobs:
 
 ## Versioning
 
-Pin the caller to `@v1` (or a more specific tag) to avoid surprises when the reusable workflow evolves. New backwards-compatible features go in `v1.x`; breaking changes require a new major (`@v2`).
+Pin the caller to `@v1` (or a more specific tag like `@v1.3`) to avoid surprises when the reusable workflow evolves. New backwards-compatible features go in a fresh tag (`v1.4`, `v1.5`, ...); breaking changes require a new major (`@v2`).
+
+`v*` tags are protected via a repository ruleset — they cannot be deleted, force-pushed, or rewritten. To ship a fix, create a new tag and have consumers update their `@v1.x` pin. The `@v1` pointer is therefore frozen at the current "stable" snapshot; bumping it requires temporarily lifting the ruleset.
+
+## Security
+
+This repo is **public** but contains only CI orchestration — no secrets, no proprietary code. Visibility implications:
+
+- The AWS account ID and IAM role ARN are visible. Both are safe because the role's trust policy restricts assumption to `repo:Choizapp/*:pull_request`.
+- The reusable workflow can be invoked from any repo in any org. Non-Choizapp callers will fail at the OIDC step (trust policy mismatch).
+- Pushes to `main` require a PR; force-pushes and deletions are blocked. Tags matching `v*` are similarly protected.
+- The shared script is checked out at the same commit SHA as the called workflow (`github.job_workflow_sha`), so script and workflow always travel together.
+
+Report security issues privately to the repo owner before opening a PR.
 
 ## Related
 
