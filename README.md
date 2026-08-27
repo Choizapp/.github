@@ -103,7 +103,7 @@ Report security issues privately to the repo owner before opening a PR.
 
 ### `sops-recipients.yml` — re-wrap a sops store when its recipients change
 
-For repos that keep a committed, `sops` + `age` encrypted store (helios does). Adding a teammate means adding their public key to `.sops.yaml` **and** re-encrypting the data key for them with `sops updatekeys`, which only an existing recipient can run. This workflow does that second half with a **robot key**, so the human step disappears: the newcomer opens a PR with their public key, the bot commits the re-wrapped ciphertext to the same branch, and the merge is atomic.
+For repos that keep a committed, `sops` + `age` encrypted store. Adding a teammate means adding their public key to `.sops.yaml` **and** re-encrypting the data key for them with `sops updatekeys`, which only an existing recipient can run. This workflow does that second half with a **robot key**, so the human step disappears: the newcomer opens a PR with their public key, the bot commits the re-wrapped ciphertext to the same branch, and the merge is atomic.
 
 On every run it first verifies each store still decrypts with the robot key — if `.sops.yaml` and the ciphertext have diverged, the check fails and says so.
 
@@ -131,4 +131,4 @@ jobs:
 
 Inputs, all optional: `sops-config` (`.secrets/.sops.yaml`), `stores` (`.secrets/*/.secrets.enc`), `input-type` (`dotenv`), `sops-version`.
 
-Setting it up once per repo: generate a keypair (`age-keygen`), add the **public** key to `.sops.yaml` as a recipient named for the robot, re-wrap once by hand, and put the **private** key in a repo secret. Keep its backup in an admin-only Vaultwarden note, like the data-pipelines robot. The trade-off to know: whoever can merge a PR that edits `.sops.yaml` can add a recipient, because the bot wraps for whatever the file says. Fine for read-only credentials; revisit before the store holds anything that writes.
+Setting it up once per repo: generate a keypair (`age-keygen`), add the **public** key to `.sops.yaml` as a recipient named for the robot, re-wrap once by hand, and put the **private** key in a repo secret. Keep its backup in an admin-only password-manager entry. The trade-off to know: whoever can merge a PR that edits `.sops.yaml` can add a recipient, because the bot wraps for whatever the file says. Fine for read-only credentials; revisit before the store holds anything that writes.
