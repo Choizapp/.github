@@ -1,0 +1,98 @@
+name: SOPS Recipients (Reusable)
+
+# Re-wraps a sops store when its recipient list changes, so nobody has to run
+# `sops updatekeys` by hand to let a new teammate decrypt.
+#
+# The consumer repo triggers this on changes to its .sops.yaml. The job decrypts
+# with a robot age key the caller passes as a secret, verifies every store still
+# opens, runs `updatekeys` for each, and commits the re-wrapped ciphertext back
+# to the same branch. On a pull request that keeps the merge atomic: the diff
+# shows exactly who is being added, and the ciphertext already matches.
+#
+# Cost, stated: whoever can merge a PR that edits .sops.yaml can add a recipient,
+# because the robot will wrap for whatever the file says. Keep that in mind for
+# what goes into the store.
+
+on:
+  workflow_call:
+    inputs:
+      sops-config:
+        description: 'Path to the .sops.yaml that lists the recipients.'
+        type: string
+        default: '.secrets/.sops.yaml'
+      stores:
+        description: 'Glob of the encrypted store files to re-wrap.'
+        type: string
+        default: '.secrets/*/.secrets.enc'
+      input-type:
+        description: 'sops --input-type for the stores (dotenv, yaml, json, binary).'
+        type: string
+        default: 'dotenv'
+      sops-version:
+        type: string
+        default: '3.13.3'
+    secrets:
+      robot-age-key:
+        description: 'Private age key of a recipient that is already in .sops.yaml. Stored as a repo secret, never committed.'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  rewrap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # On a PR, work on the PR branch so the re-wrap lands in the same diff.
+          ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Install sops and age
+        run: |
+          curl -fsSL "https://github.com/getsops/sops/releases/download/v${{ inputs.sops-version }}/sops-v${{ inputs.sops-version }}.linux.amd64" -o /usr/local/bin/sops
+          chmod +x /usr/local/bin/sops
+          sudo apt-get update -qq && sudo apt-get install -y -qq age >/dev/null
+          sops --version && age --version
+
+      - name: Load the robot key
+        run: |
+          umask 077
+          printf '%s\n' "${{ secrets.robot-age-key }}" > "$RUNNER_TEMP/age.key"
+          echo "SOPS_AGE_KEY_FILE=$RUNNER_TEMP/age.key" >> "$GITHUB_ENV"
+
+      - name: Verify every store opens with the robot key
+        run: |
+          set -e
+          for store in ${{ inputs.stores }}; do
+            sops --config "${{ inputs.sops-config }}" -d --input-type "${{ inputs.input-type }}" --output-type "${{ inputs.input-type }}" "$store" >/dev/null \
+              || { echo "::error file=$store::the robot key cannot decrypt this store — .sops.yaml and the ciphertext have diverged, or the robot was removed from the recipients"; exit 1; }
+            echo "ok: $store"
+          done
+
+      - name: Re-wrap for the current recipients
+        run: |
+          set -e
+          for store in ${{ inputs.stores }}; do
+            sops --config "${{ inputs.sops-config }}" updatekeys --yes --input-type "${{ inputs.input-type }}" "$store"
+          done
+
+      - name: Commit if anything changed
+        run: |
+          if git diff --quiet -- ${{ inputs.stores }}; then
+            echo "recipients unchanged — nothing to re-wrap"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ${{ inputs.stores }}
+          git commit -m "chore: re-wrap the store for the current recipients
+
+Automatic: .sops.yaml changed, so the data key is re-encrypted for every
+recipient it lists. No secret value changed."
+          git push origin HEAD:${{ github.head_ref || github.ref_name }}
+
+      - name: Wipe the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/age.key"
